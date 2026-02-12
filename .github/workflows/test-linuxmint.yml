@@ -1,0 +1,97 @@
+name: Test Installer - Linux Mint
+on:
+  workflow_call:
+    inputs:
+      artifact_name:
+        description: 'Name of the install script artifact'
+        required: true
+        type: string
+        default: 'install-script'
+
+jobs:
+  test-installer:
+    name: Test installer - Mint ${{ matrix.mint_version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - mint_version: "21.3"
+            mint_codename: "virginia"
+            base_distro: "ubuntu:22.04"
+            ubuntu_codename: "jammy"
+          - mint_version: "22.1"
+            mint_codename: "xia"
+            base_distro: "ubuntu:24.04"
+            ubuntu_codename: "noble"
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download install.sh
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ inputs.artifact_name }}
+
+    - name: Test in Mint ${{ matrix.mint_version }} container based on ${{ matrix.base_distro }}
+      run: |
+        docker run --rm -v "$PWD:/workspace" -w /workspace ${{ matrix.base_distro }} bash -c "
+          set -e
+
+          # Add the Linux Mint GPG key
+          curl -fsSL -o /tmp/linuxmint-keyring.deb http://packages.linuxmint.com/pool/main/l/linuxmint-keyring/linuxmint-keyring_2022.06.21_all.deb
+          dpkg -i /tmp/linuxmint-keyring.deb
+          rm -f /tmp/linuxmint-keyring.deb
+
+          # Create the apt repository for Linux Mint
+          echo "deb http://packages.linuxmint.com ${{ matrix.mint_codename }} main upstream import backport" > /etc/apt/sources.list.d/official-package-repositories.list
+          echo "deb http://archive.ubuntu.com/ubuntu ${{ matrix.ubuntu_codename }} main restricted universe multiverse" >> /etc/apt/sources.list.d/official-package-repositories.list
+          echo "deb http://archive.ubuntu.com/ubuntu ${{ matrix.ubuntu_codename }}-updates main restricted universe multiverse" >> /etc/apt/sources.list.d/official-package-repositories.list
+          echo "deb http://archive.ubuntu.com/ubuntu ${{ matrix.ubuntu_codename }}-backports main restricted universe multiverse" >> /etc/apt/sources.list.d/official-package-repositories.list
+          echo "deb http://security.ubuntu.com/ubuntu ${{ matrix.ubuntu_codename }}-security main restricted universe multiverse" >> /etc/apt/sources.list.d/official-package-repositories.list
+          
+          # Mint doesn't use sources.list
+          echo "#/etc/apt/sources.list" > /etc/apt/sources.list
+          # Mint doesn't have ubuntu.sources
+          rm -f /etc/apt/sources.list.d/ubuntu.sources
+          
+          apt-get update
+
+          # Install required packages
+          apt-get install -y --no-install-recommends --allow-downgrades \
+            base-files/${{ matrix.mint_codename }} \
+            mintsystem \
+            mint-meta-core \
+            mint-meta-cinnamon \
+            git python3-pip jq curl sudo
+
+          # Create a non-root user for testing
+          useradd -m -s /bin/bash testuser
+          echo 'testuser ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/testuser
+
+          # Copy workspace to user home and change ownership
+          cp -r /workspace /home/testuser/workspace
+          chown -R testuser:testuser /home/testuser/workspace
+
+          # Switch to test user and run installer
+          su - testuser -c '
+            cd /home/testuser/workspace
+
+            # Run installer with test configuration (skip hardware-dependent steps)
+            timeout 600 bash install.sh \
+              --mode-non-interactive \
+              --install-kmd \
+              --no-install-hugepages \
+              --update-firmware=on \
+              --install-metalium-container \
+              --install-sfpi \
+              --python-choice=new-venv \
+              --reboot-option=never || {
+              echo \"Installer timed out or failed\"
+              exit 1
+            }
+
+            echo \"✓ Installer completed successfully in container mode\"
+          '
+        "
