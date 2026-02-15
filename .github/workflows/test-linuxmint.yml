@@ -1,3 +1,4 @@
+# Standalone test trigger after permission fix
 name: Test Installer - Linux Mint
 on:
   push:
