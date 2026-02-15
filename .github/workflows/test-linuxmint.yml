@@ -45,7 +45,6 @@ jobs:
       continue-on-error: true
       with:
         name: ${{ inputs.artifact_name || 'install-script' }}
-        fail-on-artifact-not-found: false
 
     - name: Use dummy install.sh if download failed (for standalone test)
       if: steps.download.outcome != 'success'
@@ -65,7 +64,7 @@ jobs:
 
           # Install basic dependencies first
           apt-get update
-          apt-get install -y --no-install-recommends curl ca-certificates
+          apt-get install -y --no-install-recommends curl ca-certificates gnupg
 
           # Add the Linux Mint GPG key
           curl -fsSL -o /tmp/linuxmint-keyring.deb http://packages.linuxmint.com/pool/main/l/linuxmint-keyring/linuxmint-keyring_2022.06.21_all.deb
